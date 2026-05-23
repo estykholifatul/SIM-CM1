@@ -1,0 +1,525 @@
+---
+title: "Analisis Performa Film Berdasarkan Genre pada Database Sakila"
+author: "Esty Kholifatul Kartika (M0725035)"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    theme: yeti
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+---
+
+```{=html}
+<!-- ====================================================
+     CUSTOM CSS & HTML — Kustomisasi tampilan laporan
+     ==================================================== -->
+<style>
+
+  :root {
+    --biru:    #5673B8;
+    --pink:   #E07593;
+    --gelap:   #5D5F6E;
+    --abu:     #878CA1;
+    --border:  #e0ddd5;
+    --bg-card: #F2F2F2;
+  }
+
+  body {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.8;
+    color: var(--gelap);
+  }
+
+  /* Headings */
+  h1, h2, h3 {
+    font-family: Georgia, serif;
+  }
+  h2 {
+    color: var(--gelap) !important;
+    border-bottom: 2px solid var(--border) !important;
+    padding-bottom: 0.4rem;
+  }
+
+  /* Callout boxes */
+  .callout-info {
+    border-left: 4px solid var(--biru);
+    background: #eef3ff;
+    border-radius: 0 8px 8px 0;
+    padding: 0.9rem 1.2rem;
+    margin: 1rem 0;
+    font-size: 0.93rem;
+    color: #1e3a8a;
+  }
+  .callout-key {
+    border-left: 4px solid var(--pink);
+    background: #fff0f4;
+    border-radius: 0 8px 8px 0;
+    padding: 0.9rem 1.2rem;
+    margin: 1rem 0;
+    font-size: 0.93rem;
+    color: #7f1d3f;
+  }
+
+  /* Stat pills */
+  .stat-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.25rem 0;
+  }
+  .stat-pill {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem 1.2rem;
+    text-align: center;
+    flex: 1;
+    min-width: 130px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .stat-pill .num {
+    display: block;
+    font-family: 'Playfair Display', serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--biru);
+    line-height: 1;
+  }
+  .stat-pill .lbl {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--abu);
+    margin-top: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* Equation block */
+  .eq-block {
+    background: #f8f7f4;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    text-align: center;
+    overflow-x: auto;
+  }
+
+  /* Code */
+  pre, code {
+    font-family: Consolas, monospace !important;
+    font-size: 0.83rem !important;
+  }
+
+</style>
+
+```
+
+# Pendahuluan
+
+```{=html}
+<div class="callout-info">
+<strong>Insight yang diambil:</strong> Menganalisis performa setiap genre film pada database Sakila berdasarkan <em>frekuensi penyewaan</em> dan <em>total pendapatan</em> untuk menjawab pertanyaan: genre apa yang paling diminati pelanggan dan apakah genre yang populer selalu menghasilkan pendapatan tertinggi?
+</div>
+```
+
+Database **Sakila** adalah database sampel resmi MySQL yang merepresentasikan sistem manajemen toko penyewaan film. Pada laporan ini, analisis berfokus pada lima tabel: `category`, `film_category`, `film`, `rental`, dan `payment`.
+
+Pertanyaan yang diajukan:
+
+1. Genre film apa yang **paling sering disewa** oleh pelanggan?
+2. Genre film apa yang menghasilkan **total pendapatan tertinggi**?
+3. Apakah terdapat **korelasi** antara frekuensi penyewaan dan total pendapatan per genre?
+
+```{=html}
+<div class="stat-row">
+  <div class="stat-pill"><span class="num">16</span><span class="lbl">Tabel database</span></div> 
+  <div class="stat-pill"><span class="num">16</span><span class="lbl">Genre film</span></div>
+  <div class="stat-pill"><span class="num">1.000</span><span class="lbl">Film tersedia</span></div>
+  <div class="stat-pill"><span class="num">16.044</span><span class="lbl">Transaksi sewa</span></div>
+</div>
+```
+
+---
+
+# Metodologi & Persiapan Data
+
+## Load Library
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  fig.width = 9,
+  fig.height = 5.5,
+  dpi       = 150
+)
+```
+
+```{r library}
+# Library yang digunakan
+library(DBI)      # Koneksi dan query database
+library(odbc)     # Driver koneksi MySQL via ODBC
+library(ggplot2)  # Visualisasi data
+library(dplyr)    # Manipulasi data
+library(tidyr)    # Transformasi data
+library(knitr)    # Render tabel dengan kable()
+library(kableExtra) # Kustomisasi tabel
+```
+
+## Koneksi ke Database Sakila
+
+```{r koneksi}
+con <- DBI::dbConnect(
+  odbc::odbc(),
+  Driver   = "MySQL ODBC 8.0 ANSI Driver", 
+  Server   = "127.0.0.1",
+  Database = "sakila",
+  UID      = "root",
+  PWD      = "090108",     
+  Port     = 3306
+)
+```
+
+## Query SQL
+
+### Query 1 — Frekuensi penyewaan per genre
+
+```{r query_sewa}
+df_rental <- dbGetQuery(con, "SELECT c.name AS genre, COUNT(r.rental_id) AS total_rental
+                              FROM category c
+                              JOIN film_category fc ON c.category_id = fc.category_id
+                              JOIN film f ON fc.film_id = f.film_id
+                              JOIN inventory i ON f.film_id = i.film_id
+                              JOIN rental r ON i.inventory_id = r.inventory_id
+                              GROUP BY c.name
+                              ORDER BY total_rental DESC;")
+head(df_rental)
+```
+
+```{=html}
+<div class="callout-key">
+Dapat dilihat bahwa <em>Sports</em> (1.179 transaksi), <em>Animation</em> (1.166 transaksi) dan <em>Action</em> (1.112 transaksi) merupakan tiga besar genre dengan frekuensi penyewaan tertinggi.
+</div>
+```
+
+### Query 2 — Total dan rata-rata pendapatan per genre
+
+```{r query_pendapatan}
+df_pendapatan <- dbGetQuery(con, "SELECT 
+                                      c.name AS genre, 
+                                      SUM(p.amount) AS total_pendapatan, 
+                                      ROUND(AVG(p.amount), 2) AS rata_rata_pembayaran
+                                  FROM category c
+                                  JOIN film_category fc ON c.category_id = fc.category_id
+                                  JOIN film f ON fc.film_id = f.film_id
+                                  JOIN inventory i ON f.film_id = i.film_id
+                                  JOIN rental r ON i.inventory_id = r.inventory_id
+                                  JOIN payment p ON r.rental_id = p.rental_id
+                                  GROUP BY c.name
+                                  ORDER BY total_pendapatan DESC;")
+head(df_pendapatan)
+```
+
+```{=html}
+<div class="callout-key">
+<em>Sports</em>, <em>Sci-Fi</em> dan <em>Animation</em> merupakan tiga besar genre dengan total pendapatan tertinggi. 
+</div>
+```
+
+### Query 3 — Jumlah film dan harga sewa rata-rata per genre
+
+```{r query_film}
+df_film <- dbGetQuery(con, "SELECT 
+                               c.name AS genre, 
+                               ROUND(AVG(f.rental_rate), 2) AS rata_rata_tarif_rental, 
+                               COUNT(DISTINCT f.film_id) AS jumlah_film
+                            FROM category c
+                            JOIN film_category fc ON c.category_id = fc.category_id
+                            JOIN film f ON fc.film_id = f.film_id
+                            GROUP BY c.name
+                            ORDER BY rata_rata_tarif_rental DESC;")
+head(df_film)
+```
+
+```{=html}
+<div class="callout-info">
+<p>1. <strong>rata_rata_tarif_rental</strong> adalah rata-rata harga sewa yang ditentukan oleh toko untuk satu judul film di genre tersebut. Jika angkanya tinggi, berarti genre itu dikategorikan sebagai kelompok film premium atau kelas atas oleh toko.</p>
+<p>2. <strong>jumlah_film</strong> adalah total seluruh variasi judul film unik yang dimiliki dan disediakan oleh toko. Semakin banyak jumlahnya, berarti toko menawarkan lebih banyak pilihan variasi judul kepada konsumen.</p>
+</div>
+```
+
+## Gabungkan dan Olah Data
+
+```{r gabung}
+# Gabungkan ketiga dataset berdasarkan kolom genre
+df <- df_rental %>%
+  left_join(df_pendapatan, by = "genre") %>%
+  left_join(df_film,    by = "genre") %>%
+  mutate(
+    proporsi_pendapatan = total_pendapatan / sum(total_pendapatan) * 100,
+    proporsi_rental  = total_rental  / sum(total_rental)  * 100,
+    selisih_proporsi = proporsi_pendapatan - proporsi_rental
+  )
+head(df)
+```
+
+```{r putus_koneksi}
+# Putuskan koneksi setelah semua query selesai
+dbDisconnect(con)
+```
+
+---
+
+# Eksplorasi & Visualisasi Data
+
+## Tabel Ringkasan Dataset
+
+```{r tabel_ringkasan}
+df_tampil <- df %>%
+  arrange(desc(total_pendapatan)) %>%
+  mutate(
+    total_pendapatan          = round(total_pendapatan, 2),
+    rata_rata_pembayaran = round(rata_rata_pembayaran, 2)
+  ) %>%
+  select(genre, total_rental, total_pendapatan, rata_rata_pembayaran, jumlah_film)
+
+kable(
+  df_tampil,
+  col.names = c("Genre", "Total Sewa", "Total Pendapatan (USD)", "Rata-rata Pembayaran (USD)", "Jumlah Film"),
+  align     = "lrrrr",
+  caption   = "Tabel 1. Ringkasan performa setiap genre film"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE)
+```
+
+## Visualisasi 1 — Frekuensi Penyewaan per Genre
+
+```{r visualisasi_rental, fig.cap="Gambar 1. Jumlah transaksi penyewaan per genre (diurutkan descending)"}
+df_rental_plot <- df %>%
+  mutate(
+    genre   = reorder(genre, total_rental),
+    is_top3 = rank(-total_rental) <= 3,
+    warna   = ifelse(is_top3, "pink", "skyblue")
+  )
+
+ggplot(df_rental_plot, aes(x = genre, y = total_rental, fill = warna)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(
+    aes(label = format(total_rental, big.mark = ".")),
+    hjust = -0.15, size = 3.2, color = "darkgrey", fontface = "bold"
+  ) +
+  coord_flip(clip = "off") +
+  scale_fill_identity() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.18))) +
+  labs(
+    title    = "Frekuensi Penyewaan Film per Genre",
+    subtitle = "Pink = top 3 genre | Biru = genre lainnya",
+    x        = NULL,
+    y        = "Jumlah transaksi sewa",
+    caption  = "Sumber: Database Sakila"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title         = element_text(size = 15, face = "bold",
+                                      color = "#1a1c2e", family = "serif"),
+    plot.subtitle      = element_text(size = 10, color = "#5a5f7a",
+                                      margin = margin(b = 10)),
+    plot.caption       = element_text(size = 9, color = "#9a9fb0"),
+    axis.text.y        = element_text(size = 11, color = "#1a1c2e"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "#e8e6e0", linewidth = 0.4),
+    plot.margin        = margin(10, 40, 10, 10)
+  )
+```
+
+```{=html}
+<div class="callout-key">
+Genre <em>Sports</em>, <em>Animation</em>, dan <em>Action</em> menjadi yang paling populer disewa. Hal tersebut mengindikasikan bahwa konten hiburan yang aktif dan dapat dinikmati oleh semua kalangan usia jauh lebih diminati oleh pelanggan.
+</div>
+```
+
+## Visualisasi 2 — Total Pendapatan per Genre
+
+```{r visualisasi_pendapatan, fig.cap="Gambar 2. Total pendapatan per genre dalam USD"}
+df_rev_plot <- df %>%
+  mutate(
+    genre   = reorder(genre, total_pendapatan),
+    is_top3 = rank(-total_pendapatan) <= 3,
+    warna   = ifelse(is_top3, "pink", "skyblue")
+  )
+
+ggplot(df_rev_plot, aes(x = genre, y = total_pendapatan, fill = warna)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(
+    aes(label = paste0("$", format(round(total_pendapatan, 0), ))),
+    hjust = -0.12, size = 3.2, color = "darkgrey", fontface = "bold"
+  ) +
+  coord_flip(clip = "off") +
+  scale_fill_identity() +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.2)),
+    labels = function(x) paste0("$", format(x, ))
+  ) +
+  labs(
+    title    = "Total Pendapatan per Genre Film",
+    subtitle = "Pink = top 3 pendapatan | Biru = genre lainnya",
+    x        = NULL,
+    y        = "Total pendapatan (USD)",
+    caption  = "Sumber: Database Sakila"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title         = element_text(size = 15, face = "bold",
+                                      color = "#1a1c2e", family = "serif"),
+    plot.subtitle      = element_text(size = 10, color = "#5a5f7a",
+                                      margin = margin(b = 10)),
+    plot.caption       = element_text(size = 9, color = "#9a9fb0"),
+    axis.text.y        = element_text(size = 11, color = "#1a1c2e"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "#e8e6e0", linewidth = 0.4),
+    plot.margin        = margin(10, 60, 10, 10)
+  )
+```
+
+## Visualisasi 3 — Korelasi Volume Sewa vs Pendapatan
+
+```{r kolerasi, fig.cap="Gambar 3. Hubungan antara frekuensi penyewaan dan total pendapatan per genre"}
+ggplot(df, aes(x = total_rental, y = total_pendapatan)) +
+  geom_smooth(method = "lm", se = TRUE,
+              color = "skyblue", fill = "#dde8ff", linewidth = 0.8) +
+  geom_point(aes(size = jumlah_film),
+             color = "pink", alpha = 0.7) +
+  geom_text(aes(label = genre),
+            vjust = -1.2, size = 2.9,
+            color = "#1a1c2e", fontface = "italic") +
+  scale_size_continuous(range = c(4, 12), name = "Jumlah film") +
+  labs(
+    title    = "Korelasi Frekuensi Penyewaan dan Total Pendapatan",
+    subtitle = "Ukuran titik proporsional dengan jumlah film dalam genre",
+    x        = "Total penyewaan (transaksi)",
+    y        = "Total pendapatan (USD)",
+    caption  = "Sumber: Database Sakila"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.title      = element_text(size = 15, face = "bold",
+                                   color = "#1a1c2e", family = "serif"),
+    plot.subtitle   = element_text(size = 10, color = "#5a5f7a"),
+    plot.caption    = element_text(size = 9,  color = "#9a9fb0"),
+    legend.position = "right"
+  )
+```
+
+---
+
+# Analisis Statistik
+
+## Statistik Deskriptif
+
+```{r stat_deskriptif}
+stat_rental <- df %>%
+  summarise(
+    Mean   = round(mean(total_rental), 2),
+    Median = round(median(total_rental), 2),
+    SD     = round(sd(total_rental), 2),
+    Min    = min(total_rental),
+    Max    = max(total_rental)
+  )
+
+stat_pendapatan <- df %>%
+  summarise(
+    Mean   = round(mean(total_pendapatan), 2),
+    Median = round(median(total_pendapatan), 2),
+    SD     = round(sd(total_pendapatan), 2),
+    Min    = round(min(total_pendapatan), 2),
+    Max    = round(max(total_pendapatan), 2)
+  )
+
+kable(
+  rbind(
+    cbind(Variabel = "Total Sewa",       stat_rental),
+    cbind(Variabel = "Total Pendapatan", stat_pendapatan)
+  ),
+  caption = "Tabel 2. Statistik deskriptif volume sewa dan pendapatan"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE)
+```
+
+## Rumus Statistik yang Digunakan
+
+```{=html}
+<div class="eq-block">
+```
+
+**Rata-rata (Mean):**
+$$\bar{x} = \frac{1}{n}\sum_{i=1}^{n} x_i$$
+
+**Standar Deviasi:**
+$$s = \sqrt{\frac{\sum_{i=1}^{n}(x_i - \bar{x})^2}{n-1}}$$
+
+**Koefisien Korelasi Pearson** antara volume sewa ($X$) dan pendapatan ($Y$):
+$$r = \frac{\displaystyle\sum_{i=1}^{n}(X_i - \bar{X})(Y_i - \bar{Y})}{\sqrt{\displaystyle\sum_{i=1}^{n}(X_i-\bar{X})^2 \cdot \sum_{i=1}^{n}(Y_i-\bar{Y})^2}}$$
+
+```{=html}
+</div>
+```
+
+## Uji Korelasi Pearson
+```{r uji-korelasi}
+uji_cor <- cor.test(df$total_rental, df$total_pendapatan, method = "pearson")
+
+cat("Koefisien korelasi Pearson (r):", round(uji_cor$estimate, 4), "\n")
+cat("p-value:", round(uji_cor$p.value, 6), "\n")
+cat("Confidence interval 95%:", round(uji_cor$conf.int[1], 4), "–", round(uji_cor$conf.int[2], 4), "\n")
+```
+
+```{=html}
+<div class="callout-info">
+<strong>Interpretasi:</strong> Nilai <em>r</em> yang mendekati 1 menunjukkan korelasi positif yang kuat antara frekuensi penyewaan dan total pendapatan. Jika <em>p-value</em> &lt; 0,05, korelasi tersebut signifikan secara statistik, artinya genre yang lebih sering disewa memang cenderung menghasilkan pendapatan lebih besar.
+</div>
+```
+
+## Proporsi Kontribusi per Genre
+
+```{r tabel_proporsi}
+df_proporsi <- df %>%
+  select(genre, proporsi_rental, proporsi_pendapatan, selisih_proporsi) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  arrange(desc(proporsi_pendapatan))
+
+kable(
+  df_proporsi,
+  col.names = c("Genre", "% Sewa", "% Pendapatan", "Selisih (%)"),
+  caption   = "Tabel 3. Proporsi kontribusi sewa dan pendapatan per genre"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE)
+```
+
+---
+
+# Interpretasi & Kesimpulan
+
+**1. Genre terpopuler berdasarkan frekuensi sewa**
+Genre *Sports*, *Animation*, dan *Action* secara konsisten menempati posisi teratas. Tingginya penyewaan mencerminkan preferensi pelanggan yang condong pada konten hiburan aktif dan konten untuk semua kalangan usia.
+
+**2. Genre dengan pendapatan tertinggi**
+Genre dengan harga sewa rata-rata (`rental_rate`) yang lebih tinggi dapat menghasilkan pendapatan lebih besar meskipun frekuensi sewanya relatif lebih rendah. Hal ini terlihat pada kolom *selisih (%)* di Tabel 3.
+
+**3. Kekuatan korelasi**
+Uji Pearson menunjukkan korelasi **positif yang kuat** ($r > 0.9$, $p < 0.05$), mengindikasikan bahwa genre dengan penyewaan lebih tinggi cenderung menghasilkan pendapatan lebih tinggi. Namun terdapat pengecualian pada genre dengan `rental_rate` premium.
+
+**Keterbatasan analisis:**
+
+- Data Sakila merupakan data **sintetis**, sehingga pola yang ditemukan tidak merepresentasikan kondisi pasar nyata.
+- Analisis tidak mempertimbangkan faktor **musiman** (hari libur, tren rilis film).
+- Tidak semua transaksi `rental` memiliki `payment` yang tercatat, sehingga total pendapatan mungkin sedikit *underestimated*.
+
+---
